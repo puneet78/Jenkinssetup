@@ -1,0 +1,72 @@
+---
+- name: Factory Setup Playbook by Yogesh Raheja and Gagandeep Singh
+  hosts: localhost
+  vars:
+    jenkins_hostname: localhost
+    jenkins_jar_location: /opt/jenkins-cli.jar
+
+  tasks:
+
+  - name: Performing Yum update
+    command: yum -y update
+
+  - name: Installing all pre-requisities for Factory packages
+    yum: name="{{ item }}" state=present
+    with_items:
+      - unzip
+      - tree
+      - curl
+      - java-1.8.0-openjdk
+
+  - name: Installation and setup for Version Control
+    yum: name=git state=present
+
+  - name: Renaming old packer native utility for CentOS
+    command: mv /sbin/packer /sbin/old_packer
+    ignore_errors: yes
+
+  - name: Downloading latest Packer Package under /tmp directory
+    shell: cd /tmp; wget https://releases.hashicorp.com/packer/1.1.3/packer_1.1.3_linux_amd64.zip; unzip packer_1.1.3_linux_amd64.zip; mv ./packer /usr/bin/
+
+  - name: Jenkins Setup for Factory
+    get_url: url=http://pkg.jenkins-ci.org/redhat-stable/jenkins.repo dest=/etc/yum.repos.d/jenkins.repo
+
+  - name: Adding Jenkins Key for RPM
+    rpm_key: state=present key=http://pkg.jenkins-ci.org/redhat-stable/jenkins-ci.org.key
+
+  - name: Installing Jenkins now
+    yum: name=jenkins state=present
+
+  - name: Starting Jenkins
+    service: name=jenkins state=started enabled=yes
+    notify:
+      - Restart Jenkins
+
+  - name: Download Jenkins CLI JAR file
+    get_url:
+      url: "http://{{ jenkins_hostname }}:8080/jnlpJars/jenkins-cli.jar"
+      dest: "{{ jenkins_jar_location }}"
+    register: jarfile_get
+    until: "'OK' in jarfile_get.msg or 'file already exists' in jarfile_get.msg"
+    retries: 5
+    delay: 10
+
+  - name: Finding Admin password
+    command: cat /var/lib/jenkins/secrets/initialAdminPassword
+    register: passwordadmin
+
+#  - name: Login to Jenkins GUI using initial password
+#    command: java -jar /opt/jenkins-cli.jar -s http://"{{ jenkins_hostname }}":8080 who-am-i –-username admin –-password `cat /var/lib/jenkins/secrets/initialAdminPassword`
+
+
+  - name: Installing necessary Plugins
+    command: java -jar /opt/jenkins-cli.jar -s http://"{{ jenkins_hostname }}":8080/ install-plugin {{ item }} --username admin --password b2750cc8e6c942c685489e111be82d88
+    with_items:
+      - git
+      - puppet
+    notify:
+      - Restart Jenkins
+
+  handlers:
+  - name: Restart Jenkins
+    service: name=jenkins state=restarted
